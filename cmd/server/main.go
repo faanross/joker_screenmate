@@ -10,10 +10,10 @@
 //   - HTTPS listener for file uploads from agent
 //
 // USAGE:
-//   1. Configure variables below
-//   2. Ensure your domain's NS records point to this server's IP
-//   3. Run: sudo go run ./cmd/server
-//   4. Trigger a job: curl -X POST http://localhost:9090/trigger
+//  1. Configure variables below
+//  2. Ensure your domain's NS records point to this server's IP
+//  3. Run: sudo go run ./cmd/server
+//  4. Trigger a job: curl -X POST http://localhost:9090/trigger
 package main
 
 import (
@@ -39,7 +39,7 @@ var (
 
 	// PayloadFile is the file to transfer via TXT records when a job is triggered.
 	// Use a ~2MB file for realistic traffic generation.
-	PayloadFile = "./payloads/payload.bin"
+	PayloadFile = "./payloads/payload.jpg"
 
 	// CertDir is where TLS certificates are stored/generated.
 	// If cert.pem and key.pem don't exist, they'll be auto-generated.

